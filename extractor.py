@@ -125,6 +125,9 @@ def extract_images_from_pdf(pdf_path, output_dir):
             # ハイブリッドソートの実行
             sorted_mapped_images = get_sorted_images_on_page(page, image_list)
             
+            # ページ内で使用したサフィックスのカウントを保持する辞書
+            suffix_counts = {}
+            
             # ページ内の画像を走査
             for img_idx, (img, fig_num_str) in enumerate(sorted_mapped_images):
                 xref = img[0]
@@ -133,6 +136,15 @@ def extract_images_from_pdf(pdf_path, output_dir):
                 # 元画像の基本情報を取得
                 base_image = doc.extract_image(xref)
                 image_ext = base_image["ext"]
+                
+                # 命名規則: 図番号がある場合は _fig[図番号]、なければ _[画像連番]
+                base_suffix = f"fig{fig_num_str}" if fig_num_str else f"{img_idx + 1}"
+                if base_suffix not in suffix_counts:
+                    suffix_counts[base_suffix] = 0
+                    filename_suffix = base_suffix
+                else:
+                    suffix_counts[base_suffix] += 1
+                    filename_suffix = f"{base_suffix}_{suffix_counts[base_suffix]}"
                 
                 # 透過マスクが存在する、またはPNG形式である場合、透過を復元する
                 if smask > 0 or image_ext.lower() == "png":
@@ -150,8 +162,6 @@ def extract_images_from_pdf(pdf_path, output_dir):
                         if pix.colorspace.n not in (3, 4):
                             pix = fitz.Pixmap(fitz.csRGB, pix)
                             
-                        # 命名規則: 図番号がある場合は _fig[図番号]、なければ _[画像連番]
-                        filename_suffix = f"fig{fig_num_str}" if fig_num_str else f"{img_idx + 1}"
                         filename = f"{pdf_name}_page{page_num + 1}_{filename_suffix}.{image_ext}"
                         filepath = os.path.join(target_output_dir, filename)
                         
@@ -165,7 +175,6 @@ def extract_images_from_pdf(pdf_path, output_dir):
                 
                 # 通常の画像保存処理（透過マスクなし、またはPixmapエラー時）
                 image_bytes = base_image["image"]
-                filename_suffix = f"fig{fig_num_str}" if fig_num_str else f"{img_idx + 1}"
                 filename = f"{pdf_name}_page{page_num + 1}_{filename_suffix}.{image_ext}"
                 filepath = os.path.join(target_output_dir, filename)
                 
