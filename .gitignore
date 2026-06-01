@@ -18,3 +18,8 @@ desktop.ini
 
 # 動作検証用テスト出力フォルダ (例)
 output/
+
+# PyInstaller のビルド生成物
+build/
+dist/
+*.spec
