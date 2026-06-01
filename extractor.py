@@ -28,9 +28,18 @@ def extract_images_from_pdf(pdf_path, output_dir):
         for page_num in range(len(doc)):
             page = doc[page_num]
             image_list = page.get_images(full=True)
+            # 物理位置（Y座標：上から下、X座標：左から右）で画像をソート
+            def get_image_sort_key(img_item):
+                xref = img_item[0]
+                rects = page.get_image_rects(xref)
+                if rects:
+                    return (rects[0].y0, rects[0].x0)
+                return (float('inf'), float('inf'))
+            
+            sorted_image_list = sorted(image_list, key=get_image_sort_key)
             
             # ページ内の画像を走査
-            for img_idx, img in enumerate(image_list):
+            for img_idx, img in enumerate(sorted_image_list):
                 xref = img[0]
                 smask = img[1]  # 透過マスク(Soft Mask)の xref
                 
