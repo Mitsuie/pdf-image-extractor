@@ -38,9 +38,9 @@ pdf-image-extractor/
 ├── extractor.py        # PyMuPDFを使用した画像抽出のバックエンド処理ロジック
 ├── requirements.txt    # 依存外部ライブラリの定義
 ├── README.md           # 本説明書
-├── dists/              # 配布用パッケージフォルダ
-│   └── app.exe         # ビルド済みのWindowsスタンドアロン実行ファイル
-└── log_AI-output/      # AI開発プロセスログの保存フォルダ
+└── dists/              # 配布用パッケージフォルダ
+    └── app.exe         # ビルド済みのWindowsスタンドアロン実行ファイル
+
 ```
 
 ---
@@ -64,33 +64,20 @@ pdf-image-extractor/
   1. `dists/` フォルダ内の `app.exe` をダブルクリックします。
   2. 数秒でGUI画面（デスクトップアプリ）が立ち上がります。
 
-*(※ 開発者向け: `app.exe` を再ビルドしたい場合は、仮想環境下で `pyinstaller --onefile --noconsole app.py` を実行して生成された `dist/app.exe` を `dists/app.exe` に配置してください。)*
-
 ---
 
 ### 方法②：Pythonスクリプトから直接実行する方法（開発・デバッグ用）
 
 #### 1. 依存ライブラリのインストール
-PowerShellまたはコマンドプロンプトを起動し、本プロジェクトのフォルダ内で以下のコマンドを実行して仮想環境を作成・有効化し、必要なライブラリをインストールします。
+PowerShellまたはコマンドプロンプトを起動し、本プロジェクトのフォルダ内で以下のコマンドを実行して、必要なライブラリをインストールします。
 
 ```powershell
-# プロジェクトフォルダへ移動
-cd "d:\Google Drive\マイドライブ\43_プログラム開発\pdf-image-extractor"
-
-# 仮想環境（.venv）を作成
-python -m venv .venv
-
-# 仮想環境を有効化（PowerShell）
-.venv\Scripts\Activate.ps1
-# もしくは（コマンドプロンプト）
-.venv\Scripts\activate.bat
-
 # 依存ライブラリ（PyMuPDF）をインストール
 pip install -r requirements.txt
 ```
 
 #### 2. アプリケーションの起動
-仮想環境が有効な状態で、以下のコマンドを実行します。
+以下のコマンドを実行します。
 
 ```powershell
 python app.py
