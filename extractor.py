@@ -43,32 +43,39 @@ def get_sorted_images_on_page(page, image_list):
     for img in image_list:
         xref = img[0]
         rects = page.get_image_rects(xref)
-        img_rect = rects[0] if rects else fitz.Rect(0, 0, 0, 0)
         
         best_caption = None
-        min_distance = float('inf')
         
-        for cap in captions:
-            cap_rect = cap["rect"]
-            y_gap = cap_rect.y0 - img_rect.y1  # 画像の下端とキャプションの上端の距離
-            x_overlap = max(0, min(img_rect.x1, cap_rect.x1) - max(img_rect.x0, cap_rect.x0))
+        if rects:
+            img_rect = rects[0]
+            min_distance = float('inf')
             
-            # 画像の直下にあり、距離が近い（例: 80ポイント以内）、かつ水平方向に重なりがある場合
-            if 0 <= y_gap < 80 and x_overlap > 0:
-                if y_gap < min_distance:
-                    min_distance = y_gap
-                    best_caption = cap
+            for cap in captions:
+                cap_rect = cap["rect"]
+                y_gap = cap_rect.y0 - img_rect.y1  # 画像の下端とキャプションの上端の距離
+                x_overlap = max(0, min(img_rect.x1, cap_rect.x1) - max(img_rect.x0, cap_rect.x0))
+                
+                # 画像の直下にあり、距離が近い（例: 80ポイント以内）、かつ水平方向に重なりがある場合
+                if 0 <= y_gap < 80 and x_overlap > 0:
+                    if y_gap < min_distance:
+                        min_distance = y_gap
+                        best_caption = cap
+                
+                # 画像の直上にある場合
+                elif -80 < y_gap <= 0 and x_overlap > 0:
+                    y_gap_abs = abs(cap_rect.y1 - img_rect.y0)
+                    if y_gap_abs < min_distance:
+                        min_distance = y_gap_abs
+                        best_caption = cap
+            has_rect = True
+        else:
+            img_rect = fitz.Rect(0, 0, 0, 0)
+            has_rect = False
             
-            # 画像の直上にある場合
-            elif -80 < y_gap <= 0 and x_overlap > 0:
-                y_gap_abs = abs(cap_rect.y1 - img_rect.y0)
-                if y_gap_abs < min_distance:
-                    min_distance = y_gap_abs
-                    best_caption = cap
-                    
         mapped_images.append({
             "img": img,
             "rect": img_rect,
+            "has_rect": has_rect,
             "fig_num": best_caption["fig_num"] if best_caption else None,
         })
         
@@ -79,7 +86,8 @@ def get_sorted_images_on_page(page, image_list):
     # 図番号でソート
     with_fig.sort(key=lambda x: x["fig_num"])
     # 図番号なしは物理位置（Y座標 -> X座標）でソート
-    without_fig.sort(key=lambda x: (x["rect"].y0, x["rect"].x0))
+    # 座標が取得できないものは (float('inf'), float('inf')) で末尾寄せにする
+    without_fig.sort(key=lambda x: (x["rect"].y0, x["rect"].x0) if x["has_rect"] else (float('inf'), float('inf')))
     
     sorted_mapped = with_fig + without_fig
     
@@ -110,8 +118,11 @@ def extract_images_from_pdf(pdf_path, output_dir):
         
     raw_pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
     
-    # フォルダ名は元のPDF名そのものにする（Windows OS仕様回避のため、末尾のスペースやピリオドは除去）
-    folder_name = raw_pdf_name.strip(". ")
+    # Windowsのファイル/フォルダ名禁止文字 `<>:"/\|?*` を `_` に置換
+    safe_pdf_name = re.sub(r'[<>:"/\\|?*]', '_', raw_pdf_name)
+    
+    # フォルダ名はサニタイズ後のPDF名にする（末尾のスペースやピリオドは除去）
+    folder_name = safe_pdf_name.strip(". ")
     target_output_dir = os.path.join(output_dir, folder_name)
     os.makedirs(target_output_dir, exist_ok=True)
     
@@ -126,10 +137,10 @@ def extract_images_from_pdf(pdf_path, output_dir):
     if max_pdf_name_len < 5:
         # 極端に短い、またはマイナスの場合はプレフィックスを空にする
         pdf_name = ""
-    elif len(raw_pdf_name) > max_pdf_name_len:
-        pdf_name = raw_pdf_name[:max_pdf_name_len].strip(". ")
+    elif len(safe_pdf_name) > max_pdf_name_len:
+        pdf_name = safe_pdf_name[:max_pdf_name_len].strip(". ")
     else:
-        pdf_name = raw_pdf_name
+        pdf_name = safe_pdf_name
     
     # PDFファイルを開く
     doc = fitz.open(pdf_path)
