@@ -27,7 +27,7 @@ def get_sorted_images_on_page(page, image_list):
     
     # 1. キャプションと思われるテキストブロックを抽出
     for b in blocks:
-        x0, y0, x1, y1, text, block_no, block_type = b
+        x0, y0, x1, y1, text, _, _ = b
         text_stripped = text.strip()
         fig_num = parse_figure_number(text_stripped)
         if fig_num:
@@ -70,7 +70,6 @@ def get_sorted_images_on_page(page, image_list):
             "img": img,
             "rect": img_rect,
             "fig_num": best_caption["fig_num"] if best_caption else None,
-            "caption_text": best_caption["text"] if best_caption else "",
         })
         
     # 3. ソート処理
@@ -109,27 +108,28 @@ def extract_images_from_pdf(pdf_path, output_dir):
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDFファイルが見つかりません: {pdf_path}")
         
-    # 絶対パスとしての出力先ディレクトリを取得
-    abs_output_dir = os.path.abspath(output_dir)
     raw_pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
     
-    # パス全体の文字数を200文字以下に抑えるためのPDF名（フォルダ名・プレフィックス）の最大長を計算
-    # 算出式: len(abs_output_dir) + 1 (区切り) + len(pdf_name) + 1 (区切り) + len(pdf_name) + len("_page999_fig99-99_99.jpeg") <= 200
-    # 安全バッファとして、ページ・図番号サフィックス等の長さを 35 文字、および予備として計 37 文字を引く
-    max_pdf_name_len = (200 - len(abs_output_dir) - 37) // 2
+    # フォルダ名は元のPDF名そのものにする（Windows OS仕様回避のため、末尾のスペースやピリオドは除去）
+    folder_name = raw_pdf_name.strip(". ")
+    target_output_dir = os.path.join(output_dir, folder_name)
+    os.makedirs(target_output_dir, exist_ok=True)
     
-    # 極端に短いパスにならないよう、最低でも15文字は確保する
-    if max_pdf_name_len < 15:
-        max_pdf_name_len = 15
-        
-    if len(raw_pdf_name) > max_pdf_name_len:
-        # 末尾にピリオドを付与せず、単に切り詰め、末尾のスペースやピリオドを安全に除去する
+    # 絶対パスとしての出力フォルダ名を取得
+    abs_target_dir = os.path.abspath(target_output_dir)
+    
+    # 画像ファイルパス全体の文字数を200文字以下に抑えるため、ファイル名のプレフィックス（PDF名部分）の最大長を計算
+    # 算出式: len(abs_target_dir) + 1 (区切り) + len(pdf_name) + len("_page999_fig99-99_99.jpeg") <= 200
+    # 安全バッファとして、ページ・図番号サフィックス等の長さを 35 文字とする
+    max_pdf_name_len = 200 - len(abs_target_dir) - 1 - 35
+    
+    if max_pdf_name_len < 5:
+        # 極端に短い、またはマイナスの場合はプレフィックスを空にする
+        pdf_name = ""
+    elif len(raw_pdf_name) > max_pdf_name_len:
         pdf_name = raw_pdf_name[:max_pdf_name_len].strip(". ")
     else:
         pdf_name = raw_pdf_name
-        
-    target_output_dir = os.path.join(output_dir, pdf_name)
-    os.makedirs(target_output_dir, exist_ok=True)
     
     # PDFファイルを開く
     doc = fitz.open(pdf_path)
@@ -140,6 +140,9 @@ def extract_images_from_pdf(pdf_path, output_dir):
         for page_num in range(len(doc)):
             page = doc[page_num]
             image_list = page.get_images(full=True)
+            if not image_list:
+                continue
+                
             # ハイブリッドソートの実行
             sorted_mapped_images = get_sorted_images_on_page(page, image_list)
             
@@ -180,7 +183,10 @@ def extract_images_from_pdf(pdf_path, output_dir):
                         if pix.colorspace.n not in (3, 4):
                             pix = fitz.Pixmap(fitz.csRGB, pix)
                             
-                        filename = f"{pdf_name}_page{page_num + 1}_{filename_suffix}.{image_ext}"
+                        if pdf_name:
+                            filename = f"{pdf_name}_page{page_num + 1}_{filename_suffix}.{image_ext}"
+                        else:
+                            filename = f"page{page_num + 1}_{filename_suffix}.{image_ext}"
                         filepath = os.path.join(target_output_dir, filename)
                         
                         # PixmapをPNG画像として保存
@@ -193,7 +199,10 @@ def extract_images_from_pdf(pdf_path, output_dir):
                 
                 # 通常の画像保存処理（透過マスクなし、またはPixmapエラー時）
                 image_bytes = base_image["image"]
-                filename = f"{pdf_name}_page{page_num + 1}_{filename_suffix}.{image_ext}"
+                if pdf_name:
+                    filename = f"{pdf_name}_page{page_num + 1}_{filename_suffix}.{image_ext}"
+                else:
+                    filename = f"page{page_num + 1}_{filename_suffix}.{image_ext}"
                 filepath = os.path.join(target_output_dir, filename)
                 
                 with open(filepath, "wb") as f:

@@ -94,6 +94,15 @@ class PDFImageExtractorApp:
         self.output_btn = ttk.Button(output_lf, text="フォルダ選択...", command=self.select_output_folder)
         self.output_btn.grid(row=0, column=2, pady=5)
         
+        # 抽出完了後の自動オープン用チェックボックス
+        self.open_dir_var = tk.BooleanVar(value=True)
+        self.open_dir_cb = ttk.Checkbutton(
+            output_lf, 
+            text="抽出完了後に保存先フォルダを開く", 
+            variable=self.open_dir_var
+        )
+        self.open_dir_cb.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(5, 0))
+        
         output_lf.columnconfigure(1, weight=1)
         
         # ------------------
@@ -243,6 +252,11 @@ class PDFImageExtractorApp:
             self.log(f"\n抽出が完了しました。")
             self.log(f"保存された画像の総数: {count}枚")
             messagebox.showinfo("完了", f"画像の抽出が完了しました。\n保存された画像: {count}枚")
+            if self.open_dir_var.get():
+                try:
+                    os.startfile(output_dir)
+                except Exception as folder_err:
+                    self.log(f"保存先フォルダを開けませんでした: {str(folder_err)}")
         except Exception as e:
             self.log(f"\nエラーが発生しました:\n{str(e)}")
             messagebox.showerror("エラー", f"画像抽出中にエラーが発生しました:\n{str(e)}")
@@ -263,6 +277,11 @@ class PDFImageExtractorApp:
             self.log(f"処理されたPDFファイル数: {processed_files}件")
             self.log(f"保存された画像の総数  : {total_extracted}枚")
             messagebox.showinfo("完了", f"一括処理が完了しました。\n処理ファイル数: {processed_files}件\n保存画像数: {total_extracted}枚")
+            if self.open_dir_var.get():
+                try:
+                    os.startfile(output_dir)
+                except Exception as folder_err:
+                    self.log(f"保存先フォルダを開けませんでした: {str(folder_err)}")
         except Exception as e:
             self.log(f"\nエラーが発生しました:\n{str(e)}")
             messagebox.showerror("エラー", f"一括処理中にエラーが発生しました:\n{str(e)}")
