@@ -109,7 +109,25 @@ def extract_images_from_pdf(pdf_path, output_dir):
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDFファイルが見つかりません: {pdf_path}")
         
-    pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    # 絶対パスとしての出力先ディレクトリを取得
+    abs_output_dir = os.path.abspath(output_dir)
+    raw_pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    
+    # パス全体の文字数を200文字以下に抑えるためのPDF名（フォルダ名・プレフィックス）の最大長を計算
+    # 算出式: len(abs_output_dir) + 1 (区切り) + len(pdf_name) + 1 (区切り) + len(pdf_name) + len("_page999_fig99-99_99.jpeg") <= 200
+    # 安全バッファとして、ページ・図番号サフィックス等の長さを 35 文字、および予備として計 37 文字を引く
+    max_pdf_name_len = (200 - len(abs_output_dir) - 37) // 2
+    
+    # 極端に短いパスにならないよう、最低でも15文字は確保する
+    if max_pdf_name_len < 15:
+        max_pdf_name_len = 15
+        
+    if len(raw_pdf_name) > max_pdf_name_len:
+        # 末尾にピリオドを付与せず、単に切り詰め、末尾のスペースやピリオドを安全に除去する
+        pdf_name = raw_pdf_name[:max_pdf_name_len].strip(". ")
+    else:
+        pdf_name = raw_pdf_name
+        
     target_output_dir = os.path.join(output_dir, pdf_name)
     os.makedirs(target_output_dir, exist_ok=True)
     
