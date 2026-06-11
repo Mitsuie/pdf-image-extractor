@@ -23,3 +23,7 @@ output/
 build/
 dist/
 *.spec
+
+# ローカル設定ファイル
+config.json
+

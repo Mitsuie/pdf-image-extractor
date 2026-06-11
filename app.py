@@ -6,6 +6,8 @@ from tkinter.scrolledtext import ScrolledText
 
 # バックエンド処理のインポート
 from extractor import extract_images_from_pdf, extract_images_from_folder
+import json
+
 
 class PDFImageExtractorApp:
     def __init__(self, root):
@@ -13,6 +15,8 @@ class PDFImageExtractorApp:
         self.root.title("PDF画像抽出ツール (PyMuPDF)")
         self.root.geometry("680x580")
         self.root.minsize(600, 500)
+        
+        self.CONFIG_FILE = self.get_config_path()
         
         # スタイル設定（モダンなclamテーマを使用）
         self.style = ttk.Style()
@@ -87,12 +91,16 @@ class PDFImageExtractorApp:
         self.output_label = ttk.Label(output_lf, text="保存先フォルダ:")
         self.output_label.grid(row=0, column=0, sticky=tk.W, pady=5)
         
-        self.output_path_var = tk.StringVar()
-        self.output_entry = ttk.Entry(output_lf, textvariable=self.output_path_var, width=50)
-        self.output_entry.grid(row=0, column=1, padx=(5, 10), pady=5, sticky=tk.EW)
+        self.output_path_var = tk.StringVar(value="")
+        self.output_combobox = ttk.Combobox(output_lf, textvariable=self.output_path_var, width=48)
+        self.output_combobox.grid(row=0, column=1, padx=(5, 10), pady=5, sticky=tk.EW)
         
         self.output_btn = ttk.Button(output_lf, text="フォルダ選択...", command=self.select_output_folder)
         self.output_btn.grid(row=0, column=2, pady=5)
+        
+        # 履歴の読み込みと設定
+        history = self.load_config()
+        self.output_combobox['values'] = history
         
         # 抽出完了後の自動オープン用チェックボックス
         self.open_dir_var = tk.BooleanVar(value=True)
@@ -236,6 +244,9 @@ class PDFImageExtractorApp:
         self.run_btn.config(state="disabled")
         self.clear_log()
         
+        # 履歴の保存
+        self.save_config()
+        
         # 画像抽出スレッドの起動
         thread = threading.Thread(target=target_func, args=target_args)
         thread.daemon = True
@@ -294,6 +305,84 @@ class PDFImageExtractorApp:
             if not messagebox.askyesno("確認", "画像抽出処理が実行中ですが、強制終了しますか？"):
                 return
         self.root.destroy()
+
+    def get_config_path(self):
+        """設定ファイル(config.json)の保存パスを取得します（ポータブル化 ＋ 書き込み制限へのフォールバック）。"""
+        import sys
+        
+        # 1. 実行ファイルまたはスクリプトのディレクトリを取得
+        if getattr(sys, 'frozen', False):
+            # PyInstallerなどで単体exe化されている場合：.exeの置かれているフォルダ
+            app_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            # スクリプトとして実行されている場合：ソースコードのあるフォルダ
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            
+        config_path = os.path.join(app_dir, "config.json")
+        
+        # 2. その場所に書き込み権限があるかテスト
+        try:
+            # 一時的なテストファイルを作成してみる
+            test_file = os.path.join(app_dir, ".write_test")
+            with open(test_file, "w") as f:
+                f.write("")
+            os.remove(test_file)
+            
+            # 書き込めた場合は、実行ファイルと同じフォルダのパスを返す（ポータブル動作）
+            return config_path
+            
+        except (PermissionError, OSError):
+            # C:\Program Files などに置かれて書き込み権限がない場合は、%APPDATA% にフォールバック
+            app_data_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "pdf-image-extractor")
+            os.makedirs(app_data_dir, exist_ok=True)
+            return os.path.join(app_data_dir, "config.json")
+
+    def load_config(self):
+        """設定ファイルから履歴フォルダのリストを読み込みます。"""
+        if os.path.exists(self.CONFIG_FILE):
+            try:
+                with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    history = data.get("history_output_dirs", [])
+                    if isinstance(history, list):
+                        # 正規化された非空文字列のみを抽出
+                        raw_paths = [os.path.normpath(path) for path in history if isinstance(path, str) and path.strip()]
+                        # 順序を維持して重複排除
+                        unique_paths = list(dict.fromkeys(raw_paths))
+                        # 最大3件に制限
+                        return unique_paths[:3]
+            except Exception as e:
+                print(f"Failed to load config: {e}")
+        return []
+
+    def save_config(self):
+        """現在の保存先フォルダを履歴に追加し、設定ファイルに保存します。"""
+        output_dir = self.output_path_var.get().strip()
+        if not output_dir:
+            return
+            
+        output_dir = os.path.normpath(output_dir)
+        
+        # 既存の履歴を読み込み
+        history = list(self.output_combobox['values'])
+        
+        # 重複の排除と順番の更新（一旦削除して先頭に追加する）
+        if output_dir in history:
+            history.remove(output_dir)
+        history.insert(0, output_dir)
+        
+        # 最大3件に制限
+        history = history[:3]
+        
+        # コンボボックスの値を更新
+        self.output_combobox['values'] = history
+        
+        # ファイルに保存
+        try:
+            with open(self.CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump({"history_output_dirs": history}, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Failed to save config: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
