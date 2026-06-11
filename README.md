@@ -41,9 +41,9 @@ pdf-image-extractor/
 ├── README.md           # 本説明書
 ├── doc/                # 詳細ガイドフォルダ
 │   ├── venv_guide.md                 # 仮想環境（venv）の作成・利用ガイド
-│   └── executable_creation_guide.md  # 実行ファイル（exe）作成ガイド
+│   └── executable_creation_guide.md  # 実行ファイル（.exe）作成ガイド
 └── dists/              # 配布用パッケージフォルダ
-    └── app.exe         # ビルド済みのWindowsスタンドアロン実行ファイル
+    └── PDFImageExtractor.exe # ビルド済みのWindowsスタンドアロン実行ファイル
 ```
 
 ---
@@ -54,10 +54,10 @@ pdf-image-extractor/
 
 ### 方法①：環境構築不要！ビルド済み実行ファイル（.exe）での実行
 
-`dists/app.exe` を使用すると、Python環境や追加のライブラリインストールを一切行うことなく、すぐにアプリケーションを実行できます。
+`dists/PDFImageExtractor.exe` を使用すると、Python環境や追加のライブラリインストールを一切行うことなく、すぐにアプリケーションを実行できます。
 
 * **実行手順**:
-  1. `dists/` フォルダ内の `app.exe` をダブルクリックします。
+  1. `dists/` フォルダ内の `PDFImageExtractor.exe` をダブルクリックします。
   2. 数秒でGUI画面（デスクトップアプリ）が立ち上がります。
 
 > [!NOTE]
