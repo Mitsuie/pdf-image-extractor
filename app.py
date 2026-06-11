@@ -345,7 +345,12 @@ class PDFImageExtractorApp:
                     data = json.load(f)
                     history = data.get("history_output_dirs", [])
                     if isinstance(history, list):
-                        return [os.path.normpath(path) for path in history if isinstance(path, str) and path.strip()]
+                        # 正規化された非空文字列のみを抽出
+                        raw_paths = [os.path.normpath(path) for path in history if isinstance(path, str) and path.strip()]
+                        # 順序を維持して重複排除
+                        unique_paths = list(dict.fromkeys(raw_paths))
+                        # 最大3件に制限
+                        return unique_paths[:3]
             except Exception as e:
                 print(f"Failed to load config: {e}")
         return []
