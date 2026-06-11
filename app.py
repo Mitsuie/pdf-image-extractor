@@ -16,7 +16,7 @@ class PDFImageExtractorApp:
         self.root.geometry("680x580")
         self.root.minsize(600, 500)
         
-        self.CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        self.CONFIG_FILE = self.get_config_path()
         
         # スタイル設定（モダンなclamテーマを使用）
         self.style = ttk.Style()
@@ -305,6 +305,37 @@ class PDFImageExtractorApp:
             if not messagebox.askyesno("確認", "画像抽出処理が実行中ですが、強制終了しますか？"):
                 return
         self.root.destroy()
+
+    def get_config_path(self):
+        """設定ファイル(config.json)の保存パスを取得します（ポータブル化 ＋ 書き込み制限へのフォールバック）。"""
+        import sys
+        
+        # 1. 実行ファイルまたはスクリプトのディレクトリを取得
+        if getattr(sys, 'frozen', False):
+            # PyInstallerなどで単体exe化されている場合：.exeの置かれているフォルダ
+            app_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            # スクリプトとして実行されている場合：ソースコードのあるフォルダ
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            
+        config_path = os.path.join(app_dir, "config.json")
+        
+        # 2. その場所に書き込み権限があるかテスト
+        try:
+            # 一時的なテストファイルを作成してみる
+            test_file = os.path.join(app_dir, ".write_test")
+            with open(test_file, "w") as f:
+                f.write("")
+            os.remove(test_file)
+            
+            # 書き込めた場合は、実行ファイルと同じフォルダのパスを返す（ポータブル動作）
+            return config_path
+            
+        except (PermissionError, OSError):
+            # C:\Program Files などに置かれて書き込み権限がない場合は、%APPDATA% にフォールバック
+            app_data_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "pdf-image-extractor")
+            os.makedirs(app_data_dir, exist_ok=True)
+            return os.path.join(app_data_dir, "config.json")
 
     def load_config(self):
         """設定ファイルから履歴フォルダのリストを読み込みます。"""
