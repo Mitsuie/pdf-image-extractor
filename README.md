@@ -35,8 +35,11 @@ PyMuPDF（`fitz`）ライブラリを使用した、PDFファイルから埋め�
 
 ```text
 pdf-image-extractor/
-├── app.py              # GUIアプリケーションのメインプログラム（起動ファイル）
+├── main.py             # アプリケーションのメインエントリーポイント
+├── app_window.py       # GUIメインウィンドウおよびイベント制御
+├── config_manager.py   # 設定ファイル (config.json) の永続化管理
 ├── extractor.py        # PyMuPDFを使用した画像抽出のバックエンド処理ロジック
+├── app.py              # 後方互換用ラッパー（非推奨）
 ├── requirements.txt    # 依存外部ライブラリの定義
 ├── README.md           # 本説明書
 ├── doc/                # 詳細ガイドフォルダ
@@ -81,7 +84,7 @@ pip install -r requirements.txt
 以下のコマンドを実行します。
 
 ```powershell
-python app.py
+python main.py
 ```
 
 ---
