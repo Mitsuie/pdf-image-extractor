@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 import pytest
@@ -15,6 +16,17 @@ EXPECTED_SAMPLE_FILES = [
     "pdf_image_test_page2_1.jpeg",
     "pdf_image_test_page2_2.png",
 ]
+
+# PyMuPDF のバージョンによって PNG のバイト列が変わることがある。
+# PyMuPDF を更新して失敗した場合は、extractor.py に変更がないことを確認した上で、値を作り直す。
+# 作成時の PyMuPDF バージョン: 2.1 (MuPDF 1.28.6)
+EXPECTED_SAMPLE_SHA256: dict[str, str] = {
+    "pdf_image_test_page1_1.jpeg": "acabeed32a4a5cac1fc080f3ba1a55d4ece299118d1be62ff3d56a1cef2ab16e",
+    "pdf_image_test_page1_2.png": "ef03396bd5cc447acc937370ddacd9d368cdc98747286138ffd21ea74db9cada",
+    "pdf_image_test_page1_3.png": "38d8faa71ca569a41b3eca7dacae0fffe4a74b62a4b857b872b7f95a4e786cbb",
+    "pdf_image_test_page2_1.jpeg": "d6d4f8d1c6ab87c73db03566f28510c22d585177fecd778915acab2ba9e50a6a",
+    "pdf_image_test_page2_2.png": "4117fef00827e206b4fc17ec3115772222905130e9306ac1a0343b03bd7fb5a3",
+}
 
 
 def expected_prefix(safe_name: str, output_dir: str | Path) -> str:
@@ -74,6 +86,24 @@ def test_extract_images_from_pdf_success(tmp_path: Path, copy_sample_pdf):
     assert target_dir.is_dir()
     files = sorted(f.name for f in target_dir.iterdir() if f.is_file())
     assert files == EXPECTED_SAMPLE_FILES
+
+
+def test_sample_output_sha256_unchanged(tmp_path: Path, copy_sample_pdf):
+    pdf_path = copy_sample_pdf(tmp_path)
+    output_dir = tmp_path / "output"
+
+    count = extract_images_from_pdf(str(pdf_path), str(output_dir))
+    assert count == len(EXPECTED_SAMPLE_SHA256)
+
+    target_dir = output_dir / "pdf_image_test"
+    assert target_dir.is_dir()
+
+    actual_hashes = {
+        f.name: hashlib.sha256(f.read_bytes()).hexdigest()
+        for f in target_dir.iterdir()
+        if f.is_file()
+    }
+    assert actual_hashes == EXPECTED_SAMPLE_SHA256
 
 
 def test_extract_images_from_pdf_not_found(tmp_path: Path):
