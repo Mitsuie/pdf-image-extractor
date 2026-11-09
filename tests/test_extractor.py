@@ -1,12 +1,19 @@
 import hashlib
+import logging
 import os
 from pathlib import Path
 import pytest
 import extractor
 from extractor import (
+    build_folder_name,
+    compute_file_prefix,
     extract_images_from_folder,
     extract_images_from_pdf,
+    format_figure_number,
+    generate_image_filename,
     parse_figure_number,
+    resolve_suffix,
+    sanitize_filename,
 )
 
 EXPECTED_SAMPLE_FILES = [
@@ -324,4 +331,97 @@ def test_path_length_no_prefix(tmp_path: Path, copy_sample_pdf):
     assert len(files) == 5
     for f in files:
         assert f.name.startswith("page")
+
+
+# ---------------------------------------------------------------------------
+# リファクタリング後のヘルパー関数の単体テスト (Issue #8)
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_filename_all_forbidden_chars():
+    for ch in '<>:"/\\|?*':
+        assert sanitize_filename(f"prefix{ch}suffix") == "prefix_suffix"
+    assert sanitize_filename('<>:"/\\|?*') == "_________"
+
+
+def test_sanitize_filename_allowed_chars():
+    assert sanitize_filename("normal_file-123.pdf") == "normal_file-123.pdf"
+    assert sanitize_filename("日本語のファイル名（サンプル）") == "日本語のファイル名（サンプル）"
+
+
+def test_build_folder_name():
+    assert build_folder_name("  test. ") == "test"
+    assert build_folder_name("...test...") == "test"
+    assert build_folder_name("normal_folder") == "normal_folder"
+
+
+def test_compute_file_prefix():
+    # max_pdf_name_len = 200 - len(abs_target_dir) - 1 - 35 = 164 - len(abs_target_dir)
+    # len(abs_target_dir) = 150 のとき max_pdf_name_len = 14
+    dir_150 = "x" * 150
+
+    # 上限ちょうど（len(safe_name) == max_len） -> そのまま
+    assert compute_file_prefix("a" * 14, dir_150) == "a" * 14
+
+    # 上限を 1 文字超える -> 短縮される
+    assert compute_file_prefix("a" * 15, dir_150) == "a" * 14
+
+    # 短縮した結果の末尾が . や空白 -> 除かれる
+    assert compute_file_prefix("a" * 13 + ".extra", dir_150) == "a" * 13
+    assert compute_file_prefix("a" * 13 + " extra", dir_150) == "a" * 13
+
+    # max_len == 5 (len(abs_target_dir) = 159) -> 短縮される（空にならない）
+    dir_159 = "x" * 159
+    assert compute_file_prefix("abcdef", dir_159) == "abcde"
+    assert compute_file_prefix("abcde", dir_159) == "abcde"
+
+    # max_len == 4 (len(abs_target_dir) = 160) -> ""
+    dir_160 = "x" * 160
+    assert compute_file_prefix("abcdef", dir_160) == ""
+
+
+def test_format_figure_number():
+    assert format_figure_number((1, 2)) == "1-2"
+    assert format_figure_number((3, 0)) == "3"
+    assert format_figure_number(None) is None
+
+
+def test_resolve_suffix():
+    counts: dict[str, int] = {}
+    assert resolve_suffix("fig1", counts) == "fig1"
+    assert resolve_suffix("fig1", counts) == "fig1_1"
+    assert resolve_suffix("fig1", counts) == "fig1_2"
+
+
+def test_generate_image_filename():
+    assert generate_image_filename("my_doc", 1, "fig1", "png") == "my_doc_page1_fig1.png"
+    assert generate_image_filename("", 2, "1", "jpeg") == "page2_1.jpeg"
+
+
+def test_extract_images_fallback_on_pixmap_error(
+    tmp_path: Path, copy_sample_pdf, monkeypatch, caplog
+):
+    def fake_build_pixmap(*args, **kwargs):
+        raise RuntimeError("Pixmap creation failed intentionally")
+
+    monkeypatch.setattr(extractor, "_build_pixmap", fake_build_pixmap)
+
+    pdf_path = copy_sample_pdf(tmp_path)
+    output_dir = tmp_path / "output"
+
+    with caplog.at_level(logging.WARNING):
+        count = extract_images_from_pdf(str(pdf_path), str(output_dir))
+
+    assert count == 5
+    target_dir = output_dir / "pdf_image_test"
+    assert target_dir.is_dir()
+    files = sorted(f.name for f in target_dir.iterdir() if f.is_file())
+    # サンプル PDF 内の全画像 (xref 4, 5, 6, 9, 10) の元の extract_image(xref)["ext"] は
+    # jpeg または png であり、フォールバック時も元の拡張子で EXPECTED_SAMPLE_FILES と同等に保存される
+    assert files == EXPECTED_SAMPLE_FILES
+
+    # Pixmap による保存を試みる画像（smask > 0 または ext == 'png'）について WARNING が記録される
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 3
+    assert all("Pixmapでの保存に失敗したため、元データのまま保存します" in w.message for w in warnings)
 
