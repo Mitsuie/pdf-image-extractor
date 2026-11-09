@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import extractor
 from extractor import (
+    ExtractionCancelledError,
     build_folder_name,
     compute_file_prefix,
     extract_images_from_folder,
@@ -424,4 +425,12 @@ def test_extract_images_fallback_on_pixmap_error(
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 3
     assert all("Pixmapでの保存に失敗したため、元データのまま保存します" in w.message for w in warnings)
+
+
+def test_extraction_cancelled_error_defined():
+    """ExtractionCancelledError が Exception を継承して定義されていることを検証。"""
+    assert issubclass(ExtractionCancelledError, Exception)
+    err = ExtractionCancelledError("test")
+    assert str(err) == "test"
+
 

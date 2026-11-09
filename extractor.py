@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 import os
 import re
+import threading
 from typing import Callable
 import fitz  # PyMuPDF
 
@@ -27,6 +28,10 @@ FIGURE_NUMBER_PATTERN = re.compile(
 
 # 図番号を表す型エイリアス（メジャー番号, マイナー番号）
 FigureNumber = tuple[int, int]
+
+
+class ExtractionCancelledError(Exception):
+    """画像抽出処理がユーザーまたは外部イベントによって中断された際に送出される例外。"""
 
 
 @dataclass(frozen=True)
@@ -326,16 +331,27 @@ def get_sorted_images_on_page(page: fitz.Page, image_list: list[tuple]) -> list[
     return result
 
 
-def extract_images_from_pdf(pdf_path: str, output_dir: str) -> int:
+def extract_images_from_pdf(
+    pdf_path: str,
+    output_dir: str,
+    progress_callback: Callable[[int, int], None] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> int:
     """
     指定されたPDFファイルから画像を抽出し、指定フォルダに保存します。
 
     Args:
         pdf_path (str): 対象のPDFファイルのパス
         output_dir (str): 画像の保存先ディレクトリ
+        progress_callback (Callable[[int, int], None] | None, optional): ページ進捗コールバック (current_page, total_pages)
+        cancel_event (threading.Event | None, optional): 中断フラグ
 
     Returns:
         int: 抽出された画像数
+
+    Raises:
+        FileNotFoundError: PDFファイルが存在しない場合
+        ExtractionCancelledError: ユーザーにより処理が中断された場合
     """
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDFファイルが見つかりません: {pdf_path}")
@@ -358,14 +374,20 @@ def extract_images_from_pdf(pdf_path: str, output_dir: str) -> int:
 
     # PDFファイルを開く
     doc = fitz.open(pdf_path)
+    total_pages = len(doc)
     extracted_count = 0
 
     try:
         # 全ページを走査
-        for page_num in range(len(doc)):
+        for page_num in range(total_pages):
+            if cancel_event is not None and cancel_event.is_set():
+                raise ExtractionCancelledError("ユーザーにより処理が中断されました。")
+
             page = doc[page_num]
             image_list = page.get_images(full=True)
             if not image_list:
+                if progress_callback:
+                    progress_callback(page_num + 1, total_pages)
                 continue
 
             # ハイブリッドソートの実行
@@ -396,6 +418,9 @@ def extract_images_from_pdf(pdf_path: str, output_dir: str) -> int:
                     target_dir=target_output_dir,
                 )
                 extracted_count += 1
+
+            if progress_callback:
+                progress_callback(page_num + 1, total_pages)
     finally:
         doc.close()
 
@@ -406,6 +431,9 @@ def extract_images_from_folder(
     input_dir: str,
     output_dir: str,
     log_callback: Callable[[str], None] | None = None,
+    file_progress_callback: Callable[[int, int], None] | None = None,
+    page_progress_callback: Callable[[int, int], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[int, int]:
     """
     指定されたフォルダ内のすべてのPDFファイルから画像を抽出します。
@@ -414,9 +442,16 @@ def extract_images_from_folder(
         input_dir (str): PDFファイルが格納されたディレクトリ
         output_dir (str): 画像の保存先ディレクトリ
         log_callback (Callable[[str], None] | None, optional): ログメッセージを受け取るコールバック関数
+        file_progress_callback (Callable[[int, int], None] | None, optional): ファイル進捗コールバック (current_file, total_files)
+        page_progress_callback (Callable[[int, int], None] | None, optional): ページ進捗コールバック (current_page, total_pages)
+        cancel_event (threading.Event | None, optional): 中断フラグ
 
     Returns:
         tuple[int, int]: (処理されたPDFファイル数, 抽出された総画像数)
+
+    Raises:
+        FileNotFoundError: 入力フォルダが存在しない場合
+        ExtractionCancelledError: ユーザーにより処理が中断された場合
     """
     if not os.path.exists(input_dir):
         raise FileNotFoundError(f"入力フォルダが見つかりません: {input_dir}")
@@ -432,19 +467,33 @@ def extract_images_from_folder(
 
     total_extracted = 0
     processed_files = 0
+    total_files = len(pdf_files)
 
-    for pdf_file in pdf_files:
+    for file_idx, pdf_file in enumerate(pdf_files):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ExtractionCancelledError("ユーザーにより処理が中断されました。")
+
         pdf_path = os.path.join(input_dir, pdf_file)
         if log_callback:
             log_callback(f"処理中: {pdf_file} ...")
         try:
-            count = extract_images_from_pdf(pdf_path, output_dir)
+            count = extract_images_from_pdf(
+                pdf_path,
+                output_dir,
+                progress_callback=page_progress_callback,
+                cancel_event=cancel_event,
+            )
             total_extracted += count
             processed_files += 1
             if log_callback:
                 log_callback(f"  -> 完了: {pdf_file} (抽出画像数: {count}枚)")
+        except ExtractionCancelledError:
+            raise
         except Exception as e:
             if log_callback:
                 log_callback(f"  -> エラー: {pdf_file} の処理中にエラーが発生しました: {str(e)}")
+        finally:
+            if file_progress_callback:
+                file_progress_callback(file_idx + 1, total_files)
 
     return processed_files, total_extracted

@@ -10,7 +10,11 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from config_manager import ConfigManager
-from extractor import extract_images_from_folder, extract_images_from_pdf
+from extractor import (
+    ExtractionCancelledError,
+    extract_images_from_folder,
+    extract_images_from_pdf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,7 @@ class AppWindow:
         self.config_manager: ConfigManager = (
             config_manager if config_manager is not None else ConfigManager()
         )
+        self.cancel_event = threading.Event()
 
         # スタイル設定（モダンなclamテーマを使用）
         self.style = ttk.Style()
@@ -193,7 +198,8 @@ class AppWindow:
         )
         self.style.map(
             "Danger.TButton",
-            background=[("active", "#cf5e43")],
+            background=[("active", "#cf5e43"), ("disabled", "#dcdcdc")],
+            foreground=[("disabled", "#a1a1a1")],
         )
 
         # 画像抽出を実行ボタン
@@ -203,7 +209,17 @@ class AppWindow:
             command=self.start_extraction,
             style="Accent.TButton",
         )
-        self.run_btn.grid(row=0, column=0, padx=10, sticky=tk.EW, ipady=6)
+        self.run_btn.grid(row=0, column=0, padx=5, sticky=tk.EW, ipady=6)
+
+        # 中断ボタン
+        self.cancel_btn = ttk.Button(
+            btn_frame,
+            text="中断",
+            command=self.cancel_extraction,
+            style="Danger.TButton",
+            state="disabled",
+        )
+        self.cancel_btn.grid(row=0, column=1, padx=5, sticky=tk.EW, ipady=6)
 
         # 終了ボタン
         self.exit_btn = ttk.Button(
@@ -212,15 +228,23 @@ class AppWindow:
             command=self.safe_exit,
             style="Danger.TButton",
         )
-        self.exit_btn.grid(row=0, column=1, padx=10, sticky=tk.EW, ipady=6)
+        self.exit_btn.grid(row=0, column=2, padx=5, sticky=tk.EW, ipady=6)
 
-        # カラムの幅を均等にする
-        btn_frame.columnconfigure(0, weight=1)
+        # カラムの幅を配分する
+        btn_frame.columnconfigure(0, weight=2)
         btn_frame.columnconfigure(1, weight=1)
+        btn_frame.columnconfigure(2, weight=1)
         return btn_frame
 
     def _create_log_section(self, parent: ttk.Frame) -> ttk.LabelFrame:
-        """ログ表示エリアを構築します。"""
+        """進捗プログレスバーおよびログ表示エリアを構築します。"""
+        # プログレスバーの配置
+        self.progress_bar = ttk.Progressbar(
+            parent, orient="horizontal", mode="determinate"
+        )
+        self.progress_bar.pack(fill=tk.X, pady=(0, 10))
+        self.progressbar = self.progress_bar
+
         log_lf = ttk.LabelFrame(parent, text=" 処理ログ ", padding="5")
         log_lf.pack(fill=tk.BOTH, expand=True)
 
@@ -252,6 +276,32 @@ class AppWindow:
     def safe_showerror(self, title: str, message: str) -> None:
         """エラーダイアログをメインスレッドで安全に表示します。"""
         self.root.after(0, messagebox.showerror, title, message)
+
+    def safe_update_progress(self, current: int, total: int) -> None:
+        """プログレスバーの進捗更新をメインスレッドで安全に実行します。"""
+        self.root.after(0, self._update_progress, current, total)
+
+    def _update_progress(self, current: int, total: int) -> None:
+        """プログレスバーの進捗値を更新します（メインスレッド実行用）。"""
+        if total > 0:
+            self.progress_bar["value"] = (current / total) * 100
+        else:
+            self.progress_bar["value"] = 0
+
+    def _reset_progress(self) -> None:
+        """プログレスバーを 0% にリセットします。"""
+        self.progress_bar["value"] = 0
+
+    def _on_extraction_finished(self) -> None:
+        """抽出処理終了時（完了・中断・エラー）にボタン状態を復帰します。"""
+        self.run_btn.config(state="normal")
+        self.cancel_btn.config(state="disabled")
+
+    def cancel_extraction(self) -> None:
+        """実行中の画像抽出処理の中断を要求します。"""
+        self.cancel_event.set()
+        self.safe_log("\n中断要求を送信しました。現在の処理が完了次第停止します...")
+        self.cancel_btn.config(state="disabled")
 
     def log(self, message: str) -> None:
         """ログエリアにメッセージを追記します（safe_log へのエイリアス）。"""
@@ -335,8 +385,11 @@ class AppWindow:
             target_args = (input_dir, output_dir)
             target_func = self.run_folder_extraction
 
-        # UI操作のロック（二重起動防止）
+        # UI操作のロック（二重起動防止）および中断イベントの初期化
+        self.cancel_event.clear()
         self.run_btn.config(state="disabled")
+        self.cancel_btn.config(state="normal")
+        self._reset_progress()
         self.clear_log()
 
         # 履歴の保存とコンボボックス更新
@@ -355,7 +408,12 @@ class AppWindow:
         self.safe_log(f"保存先 : {output_dir}\n")
 
         try:
-            count = extract_images_from_pdf(pdf_path, output_dir)
+            count = extract_images_from_pdf(
+                pdf_path,
+                output_dir,
+                progress_callback=self.safe_update_progress,
+                cancel_event=self.cancel_event,
+            )
             self.safe_log("\n抽出が完了しました。")
             self.safe_log(f"保存された画像の総数: {count}枚")
             self.safe_showinfo(
@@ -368,13 +426,17 @@ class AppWindow:
                     self.safe_log(
                         f"保存先フォルダを開けませんでした: {str(folder_err)}"
                     )
+        except ExtractionCancelledError:
+            self.safe_log("\n処理がユーザーによって中断されました。")
+            self.safe_log("※ 中断までに抽出された画像は保存先フォルダに残されています。")
+            self.safe_showinfo("中断", "画像抽出処理が中断されました。")
         except Exception as e:
             self.safe_log(f"\nエラーが発生しました:\n{str(e)}")
             self.safe_showerror(
                 "エラー", f"画像抽出中にエラーが発生しました:\n{str(e)}"
             )
         finally:
-            self.root.after(0, lambda: self.run_btn.config(state="normal"))
+            self.root.after(0, self._on_extraction_finished)
 
     def run_folder_extraction(self, input_dir: str, output_dir: str) -> None:
         """フォルダ一括画像抽出処理を実行します（ワーカースレッドで実行）。"""
@@ -384,7 +446,12 @@ class AppWindow:
 
         try:
             processed_files, total_extracted = extract_images_from_folder(
-                input_dir, output_dir, log_callback=self.safe_log
+                input_dir,
+                output_dir,
+                log_callback=self.safe_log,
+                file_progress_callback=self.safe_update_progress,
+                page_progress_callback=self.safe_update_progress,
+                cancel_event=self.cancel_event,
             )
             self.safe_log("\n一括処理が完了しました。")
             self.safe_log(f"処理されたPDFファイル数: {processed_files}件")
@@ -400,13 +467,17 @@ class AppWindow:
                     self.safe_log(
                         f"保存先フォルダを開けませんでした: {str(folder_err)}"
                     )
+        except ExtractionCancelledError:
+            self.safe_log("\n処理がユーザーによって中断されました。")
+            self.safe_log("※ 中断までに抽出された画像は保存先フォルダに残されています。")
+            self.safe_showinfo("中断", "画像抽出処理が中断されました。")
         except Exception as e:
             self.safe_log(f"\nエラーが発生しました:\n{str(e)}")
             self.safe_showerror(
                 "エラー", f"一括処理中にエラーが発生しました:\n{str(e)}"
             )
         finally:
-            self.root.after(0, lambda: self.run_btn.config(state="normal"))
+            self.root.after(0, self._on_extraction_finished)
 
     def safe_exit(self) -> None:
         """画像抽出中の場合は確認ダイアログを表示した上で、安全にアプリを終了します。"""
@@ -415,6 +486,7 @@ class AppWindow:
                 "確認", "画像抽出処理が実行中ですが、強制終了しますか？"
             ):
                 return
+            self.cancel_event.set()
         self.root.destroy()
 
     # ------------------

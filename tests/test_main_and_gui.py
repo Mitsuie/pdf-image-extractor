@@ -115,7 +115,9 @@ def test_app_window_initialization(tk_root: tk.Tk, tmp_path: Path):
     assert hasattr(app_win, "output_combobox")
     assert hasattr(app_win, "open_dir_cb")
     assert hasattr(app_win, "run_btn")
+    assert hasattr(app_win, "cancel_btn")
     assert hasattr(app_win, "exit_btn")
+    assert hasattr(app_win, "progress_bar")
     assert hasattr(app_win, "log_area")
     assert app_win.config_manager is cm
 
