@@ -1,6 +1,6 @@
 # PDF画像抽出ツール 実行ファイル（.exe）作成ガイド
 
-本ガイドでは、Pythonスクリプト（`app.py`）からWindows用のスタンドアロン実行ファイル（`.exe`）を作成する方法について説明します。
+本ガイドでは、Pythonスクリプト（`main.py`）からWindows用のスタンドアロン実行ファイル（`.exe`）を作成する方法について説明します。
 
 ---
 
@@ -10,8 +10,8 @@ Pythonで実行ファイルを作成するには、一般的に **`PyInstaller`*
 
 > [!NOTE]
 > **依存ファイルの自動同梱について**
-> PyInstallerは、指定したメインスクリプト（`app.py`）内の `import` 文を自動的に解析します。
-> そのため、`app.py` 内でインポートされている **`extractor.py`** の機能も、追加の設定なしで自動的に実行ファイル（`.exe`）の中に含まれます。ビルド時に `extractor.py` をコマンドライン引数で明示的に指定する必要はありません。
+> PyInstallerは、指定したメインスクリプト（`main.py`）内の `import` 文を自動的に解析します。
+> そのため、`main.py` から参照されている **`app_window.py`**、**`config_manager.py`**、**`extractor.py`** などの機能も、追加の設定なしで自動的に実行ファイル（`.exe`）の中に含まれます。ビルド時に個別のモジュールをコマンドライン引数で明示的に指定する必要はありません。
 
 ---
 
@@ -25,14 +25,14 @@ pip install pyinstaller
 ```
 
 ### ② ビルドコマンドの実行
-プロジェクトルート（`app.py` があるディレクトリ）で、以下のコマンドを実行します。
+プロジェクトルート（`main.py` があるディレクトリ）で、以下のコマンドを実行します。
 ```bash
-pyinstaller --onefile --noconsole --name="PDFImageExtractor" app.py
+pyinstaller --onefile --noconsole --name="PDFImageExtractor" main.py
 ```
 
 #### コマンドオプションの説明
 * **`--onefile`** (または `-F`): すべての依存関係とPythonスクリプトを1つの `.exe` ファイルにまとめます。
-* **`--noconsole`** (または `-w`): 起動時に背後で立ち上がるコマンドプロンプト（黒い画面）を非表示にします。今回の `app.py` のような Tkinter を使用した GUI アプリケーションでは必須のオプションです。
+* **`--noconsole`** (または `-w`): 起動時に背後で立ち上がるコマンドプロンプト（黒い画面）を非表示にします。今回の `main.py` のような Tkinter を使用した GUI アプリケーションでは必須のオプションです。
 * **`--name="PDFImageExtractor"`** (または `-n`): 作成される実行ファイルの名前を指定します。指定しない場合はスクリプト名から `app.exe` になります。
 
 ---
@@ -74,7 +74,7 @@ pip install pyinstaller
 仮想環境が有効な状態で、ビルドコマンドを実行します。
 
 ```powershell
-pyinstaller --onefile --noconsole --name="PDFImageExtractor" app.py
+pyinstaller --onefile --noconsole --name="PDFImageExtractor" main.py
 ```
 
 これにより、不要なライブラリが完全に除外され、必要最小限のファイルサイズで `.exe` ファイルが生成されます。
@@ -92,7 +92,7 @@ pyinstaller --onefile --noconsole --name="PDFImageExtractor" app.py
 
 ## 5. 注意事項とトラブルシューティング
 * **設定ファイル（`config.json`）について**:
-  `app.py` では履歴の保存用に `config.json` を使用していますが、このファイルはアプリ起動時に自動生成されます。したがって、exeファイルと同一フォルダに手動で `config.json` を配置して配布する必要はありません。
+  本アプリケーションでは履歴の保存用に `config.json` を使用していますが、このファイルはアプリ起動時に自動生成されます。したがって、exeファイルと同一フォルダに手動で `config.json` を配置して配布する必要はありません。
 * **セキュリティ警告について**:
   開発者が署名していない野良のexeファイルであるため、配布先PCで起動した際に Windows Defender や SmartScreen による警告（「WindowsによってPCが保護されました」など）が表示される場合があります。
   * **対応方法**: 警告画面の「詳細情報」リンクをクリックし、「実行」ボタンを押すことで通常通り起動させることができます。
