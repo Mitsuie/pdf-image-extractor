@@ -15,6 +15,9 @@ from extractor import (
     extract_images_from_folder,
     extract_images_from_pdf,
 )
+from update_dialog import UpdateDialog
+from updater import fetch_latest_release_info, is_newer_version
+from version import GITHUB_REPO_NAME, GITHUB_REPO_OWNER, __version__
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,9 @@ class AppWindow:
         self.style = ttk.Style()
         self.style.theme_use("clam")
 
+        # メニューバーの構築
+        self._create_menu()
+
         # 全体レイアウト用のメインフレーム
         main_frame = ttk.Frame(root, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -57,6 +63,18 @@ class AppWindow:
         self._create_output_section(main_frame)
         self._create_action_buttons(main_frame)
         self._create_log_section(main_frame)
+
+    def _create_menu(self) -> None:
+        """メニューバーを構築します。"""
+        self.menubar = tk.Menu(self.root)
+        self.root.config(menu=self.menubar)
+
+        self.help_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="ヘルプ(H)", menu=self.help_menu, underline=4)
+        self.help_menu.add_command(
+            label="更新を確認(&U)...",
+            command=self.check_for_updates,
+        )
 
     def _create_mode_section(self, parent: ttk.Frame) -> ttk.LabelFrame:
         """動作モード選択セクションを構築します。"""
@@ -502,3 +520,66 @@ class AppWindow:
         if output_dir:
             self.config_manager.add_history(output_dir)
             self.output_combobox["values"] = self.config_manager.history
+
+    # ------------------
+    # アップデート確認処理
+    # ------------------
+    def check_for_updates(self) -> None:
+        """別スレッドでGitHub Releasesから最新バージョン情報を確認します。"""
+        self.safe_log("最新バージョンの確認中...")
+        thread = threading.Thread(target=self._run_check_updates, daemon=True)
+        thread.start()
+
+    def _run_check_updates(self) -> None:
+        """ワーカースレッドでリリース情報を取得します。"""
+        try:
+            info = fetch_latest_release_info(
+                owner=GITHUB_REPO_OWNER,
+                repo=GITHUB_REPO_NAME,
+                current_version=__version__,
+            )
+            self._safe_dispatch(self._on_check_updates_result, info)
+        except Exception as e:
+            logger.exception("更新確認中に例外が発生しました")
+            self._safe_dispatch(self._on_check_updates_error, str(e))
+
+    def _safe_dispatch(self, callback, *args) -> None:
+        """スレッドセーフにメインスレッドでコールバックをスケジュールまたは実行します。"""
+        try:
+            self.root.after(0, callback, *args)
+        except (RuntimeError, tk.TclError):
+            try:
+                callback(*args)
+            except Exception as e:
+                logger.warning("safe_dispatch コールバックの実行に失敗しました: %s", e)
+
+    def _on_check_updates_result(self, info: UpdateInfo | None) -> None:
+        """更新確認結果をUIに反映します（メインスレッド実行用）。"""
+        if info is None:
+            self.safe_log("更新情報の取得に失敗しました。")
+            messagebox.showerror(
+                "更新確認",
+                "更新情報の取得に失敗しました。\nネットワーク接続を確認してください。",
+            )
+            return
+
+        if is_newer_version(__version__, info.latest_version):
+            self.safe_log(
+                f"新しいバージョンが見つかりました: v{info.latest_version} (現在: v{__version__})"
+            )
+            UpdateDialog(self.root, info)
+        else:
+            self.safe_log(f"現在のバージョンは最新です。(v{__version__})")
+            messagebox.showinfo(
+                "更新確認",
+                f"お使いのバージョン (v{__version__}) は最新です。",
+            )
+
+    def _on_check_updates_error(self, err_msg: str) -> None:
+        """更新確認時のエラーダイアログを表示します（メインスレッド実行用）。"""
+        self.safe_log(f"更新確認エラー: {err_msg}")
+        messagebox.showerror(
+            "更新確認エラー",
+            f"更新確認中にエラーが発生しました:\n{err_msg}",
+        )
+
