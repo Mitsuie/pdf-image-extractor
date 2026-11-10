@@ -1,98 +1,128 @@
-# PDF画像抽出ツール 実行ファイル（.exe）作成ガイド
+# PDF画像抽出ツール 実行ファイル（.exe）作成・パッケージングガイド
 
-本ガイドでは、Pythonスクリプト（`main.py`）からWindows用のスタンドアロン実行ファイル（`.exe`）を作成する方法について説明します。
-
----
-
-## 1. 使用するツール
-Pythonで実行ファイルを作成するには、一般的に **`PyInstaller`** を使用します。
-- `PyInstaller` は、Pythonスクリプトとその依存ライブラリ（PyMuPDFなど）を1つの実行ファイル（`.exe`）にパッケージ化するツールです。これにより、PythonがインストールされていないPCでもアプリを実行できるようになります。
-
-> [!NOTE]
-> **依存ファイルの自動同梱について**
-> PyInstallerは、指定したメインスクリプト（`main.py`）内の `import` 文を自動的に解析します。
-> そのため、`main.py` から参照されている **`app_window.py`**、**`config_manager.py`**、**`extractor.py`** などの機能も、追加の設定なしで自動的に実行ファイル（`.exe`）の中に含まれます。ビルド時に個別のモジュールをコマンドライン引数で明示的に指定する必要はありません。
+本ガイドでは、Pythonスクリプト（`main.py`）からWindows用のスタンドアロン実行ファイル（`.exe`）および配布用パッケージを作成する方法について説明します。
 
 ---
 
-## 2. 通常のexeファイル作成方法（グローバル環境）
-システムのグローバルなPython環境で実行ファイルを作成する基本的な手順です。
+## 1. ビルドの概要と使用するツール
 
-### ① PyInstallerのインストール
-まだインストールしていない場合は、以下のコマンドを実行します。
-```bash
-pip install pyinstaller
+本プロジェクトでは、実行ファイルの生成と配布パッケージングに以下のツール・スクリプトを使用します。
+
+- **`PyInstaller`**: Python スクリプトとその依存ライブラリ（PyMuPDF など）を1つの実行ファイル（`.exe`）にパッケージ化するツールです。
+- **`build.py`（ビルド自動化スクリプト）**: プロジェクトルートに配置された標準 Python スクリプトです。自動テスト（`pytest`）の実行、PyInstaller ビルド、リリース用 **SHA-256 チェックサムファイル（`.sha256`）の自動生成**、および配布用フォルダ（`dists/`）への成果物配置を一括して自動実行します。
+
+> [!IMPORTANT]
+> **SHA-256 チェックサムファイル（`.sha256`）の必要性**
+> 本アプリケーションの自動アップデート機能（GitHub Releases 連携）では、ダウンロードした更新バイナリの完全性・改ざん検知のため、`.exe` と同名の `.sha256` ファイルが必須アセットとなります。
+> `build.py` を使用することで、このチェックサムファイルが `sha256sum` 互換フォーマット（`<hash> *<filename>`）で自動生成されます。
+
+---
+
+## 2. 推奨ビルド手順（`build.py` による自動ビルド）
+
+もっとも簡単かつ確実なビルド方法は、プロジェクトルートで `build.py` を実行することです。
+
+### 基本コマンド
+```powershell
+python build.py
 ```
 
-### ② ビルドコマンドの実行
-プロジェクトルート（`main.py` があるディレクトリ）で、以下のコマンドを実行します。
-```bash
-pyinstaller --onefile --noconsole --name="PDFImageExtractor" main.py
-```
+このコマンド1つで以下の工程が自動的に連続実行されます：
+1. **ビルド前テスト**: `pytest` による単体テストの自動実行（テスト失敗時はビルドを自動中断）
+2. **中間生成物のクリーンアップ**: 以前の `build/` や `dist/` 一時ディレクトリを削除
+3. **PyInstaller ビルド**: `PDFImageExtractor.spec` を元にスタンドアロン実行ファイルをビルド
+4. **成果物配置**: `dists/PDFImageExtractor.exe` にコピー
+5. **チェックサム自動生成**: `dists/PDFImageExtractor.exe.sha256` を自動生成
+6. **事後クリーンアップ**: 一時作業フォルダ（`build/`）を安全に削除
 
-#### コマンドオプションの説明
-* **`--onefile`** (または `-F`): すべての依存関係とPythonスクリプトを1つの `.exe` ファイルにまとめます。
-* **`--noconsole`** (または `-w`): 起動時に背後で立ち上がるコマンドプロンプト（黒い画面）を非表示にします。今回の `main.py` のような Tkinter を使用した GUI アプリケーションでは必須のオプションです。
-* **`--name="PDFImageExtractor"`** (または `-n`): 作成される実行ファイルの名前を指定します。指定しない場合はスクリプト名から `app.exe` になります。
+### 利用可能なオプション
+- **`--skip-tests`**: 事前自動テストの実行をスキップして即座にビルドを開始します。
+  ```powershell
+  python build.py --skip-tests
+  ```
+- **`--output-dir <フォルダ名>`**: 成果物の出力先ディレクトリを変更します（デフォルト: `dists`）。
+  ```powershell
+  python build.py --output-dir release
+  ```
 
 ---
 
-## 3. 仮想環境におけるexeファイル作成方法（推奨）
-グローバル環境でビルドを行うと、そのPCにインストールされている無関係なライブラリまで PyInstaller が検知し、実行ファイルに同梱してしまうことがあります。その結果、**ファイルサイズが非常に大きく（数百MB）なってしまう**問題が発生します。
+## 3. 仮想環境でのビルド（推奨）
 
-そのため、必要なライブラリだけがインストールされた**仮想環境（venv）**を有効にした状態でビルドを行うことを強く推奨します。
+グローバルな Python 環境でビルドを行うと、PC にインストールされている無関係な外部パッケージ（PyTorch や OpenCV 等）を PyInstaller が検知・同梱してしまい、ファイルサイズが数十〜数百MBに肥大化するおそれがあります（本ツールの spec ファイルでは主要な不要モジュールを除外設定済みですが、仮想環境の利用が最も安全です）。
+
+最小限の依存関係のみを持つ**仮想環境（venv）**を作成してビルドすることを推奨します。
 
 ### ① 仮想環境の作成と有効化
-本プロジェクトのルートディレクトリで、仮想環境を作成しアクティベートします。
-
-**PowerShellの場合:**
 ```powershell
-# 仮想環境の作成 (既に .venv ディレクトリが存在する場合はスキップしてください)
+# 仮想環境の作成 (.venv フォルダが未作成の場合)
 python -m venv .venv
 
-# 仮想環境の有効化
+# 仮想環境の有効化 (PowerShell)
 .venv\Scripts\Activate.ps1
 ```
 > [!NOTE]
-> 有効化されると、ターミナルのプロンプトの先頭に `(.venv)` と表示されます。
+> 有効化されると、ターミナルのプロンプト先頭に `(.venv)` と表示されます。
 
-### ② 必要な依存ライブラリとPyInstallerのインストール
-仮想環境内に、アプリの動作に必要なパッケージと PyInstaller のみをインストールします。
-
+### ② 依存ライブラリのインストール
 ```powershell
-# pipを最新にする
+# pip の更新
 python -m pip install --upgrade pip
 
-# requirements.txt から依存ライブラリをインストール
+# requirements.txt からアプリ依存ライブラリをインストール
 pip install -r requirements.txt
 
-# 仮想環境内に PyInstaller をインストール
-pip install pyinstaller
+# ビルド・テストツールのインストール
+pip install pyinstaller pytest
 ```
 
-### ③ 仮想環境でのビルド実行
-仮想環境が有効な状態で、ビルドコマンドを実行します。
-
+### ③ ビルドスクリプトの実行
 ```powershell
-pyinstaller --onefile --noconsole --name="PDFImageExtractor" main.py
+python build.py
 ```
 
-これにより、不要なライブラリが完全に除外され、必要最小限のファイルサイズで `.exe` ファイルが生成されます。
+---
+
+## 4. 手動ビルド手順（参考）
+
+何らかの理由で `build.py` を使わずに手動でビルドおよびチェックサム生成を行う場合の手順です。
+
+### ① PyInstaller の手動実行
+プロジェクトルートで `PDFImageExtractor.spec` を指定して実行します。
+```powershell
+pyinstaller PDFImageExtractor.spec --clean
+```
+※ ビルドが成功すると、`dist/PDFImageExtractor.exe` が生成されます。
+
+### ② 手動での SHA-256 チェックサム計算
+PowerShell でチェックサムを計算し、`sha256sum` 互換形式で保存します。
+```powershell
+$hash = (Get-FileHash dist\PDFImageExtractor.exe -Algorithm SHA256).Hash.ToLower()
+"$hash *PDFImageExtractor.exe" | Out-File -Encoding utf8 dist\PDFImageExtractor.exe.sha256
+```
+
+### ③ 配布フォルダ（`dists/`）へのコピー
+```powershell
+Copy-Item dist\PDFImageExtractor.exe dists\
+Copy-Item dist\PDFImageExtractor.exe.sha256 dists\
+```
 
 ---
 
-## 4. ビルド後の成果物について
-ビルドが成功すると、プロジェクトフォルダ内に以下のフォルダやファイルが生成されます。
+## 5. ビルド後の成果物について
 
-* **`dist/`** : 作成された実行ファイル（`PDFImageExtractor.exe`）が格納されるフォルダです。他人に配布する際はこのファイルのみをコピーして渡します。
-* **`build/`** : ビルドプロセス中に使用される一時ファイルが格納されるフォルダです。ビルド完了後はフォルダごと削除しても問題ありません。
-* **`PDFImageExtractor.spec`** : PyInstaller のビルド構成ファイルです。ビルド設定が記載されており、次回以降はこのファイルを指定してビルド（`pyinstaller PDFImageExtractor.spec`）することも可能です。
+ビルドが完了すると、`dists/` フォルダ内に以下のファイルが配置されます。
+
+* **`dists/PDFImageExtractor.exe`** : 単一ファイル化された実行ファイル本体です。Python 未導入の環境でもそのまま起動可能です。
+* **`dists/PDFImageExtractor.exe.sha256`** : GitHub Releases のアセットとして `.exe` と一緒に公開するチェックサムファイルです。
+* **`PDFImageExtractor.spec`** : PyInstaller の構成ファイルです。エントリーポイント（`main.py`）や除外モジュール、ウィンドウ設定などが定義されています。
 
 ---
 
-## 5. 注意事項とトラブルシューティング
+## 6. 注意事項とトラブルシューティング
+
 * **設定ファイル（`config.json`）について**:
-  本アプリケーションでは履歴の保存用に `config.json` を使用していますが、このファイルはアプリ起動時に自動生成されます。したがって、exeファイルと同一フォルダに手動で `config.json` を配置して配布する必要はありません。
-* **セキュリティ警告について**:
-  開発者が署名していない野良のexeファイルであるため、配布先PCで起動した際に Windows Defender や SmartScreen による警告（「WindowsによってPCが保護されました」など）が表示される場合があります。
-  * **対応方法**: 警告画面の「詳細情報」リンクをクリックし、「実行」ボタンを押すことで通常通り起動させることができます。
+  本アプリケーションでは出力先パス等の設定保存用に `config.json` を使用していますが、このファイルはアプリ初回起動時に自動生成されます。手動で同梱・配布する必要はありません。
+* **Windows Defender / SmartScreen によるセキュリティ警告**:
+  コード署名（有料証明書）を行っていない野良 exe であるため、初回起動時に「Windows によって PC が保護されました」等の警告が表示される場合があります。
+  * **対応方法**: 画面内の「詳細情報」をクリックし、「実行」ボタンを押すことで通常通り起動します。
