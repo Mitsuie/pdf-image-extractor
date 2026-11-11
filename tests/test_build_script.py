@@ -10,7 +10,9 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from build import (
+    build_installer,
     clean_build_artifacts,
+    find_iscc_exe,
     generate_sha256_file,
     main,
     parse_args,
@@ -120,13 +122,26 @@ class TestBuildScript(unittest.TestCase):
         self.assertFalse(args.skip_tests)
         self.assertEqual(args.output_dir, "dists")
         self.assertEqual(args.spec, "PDFImageExtractor.spec")
+        self.assertFalse(args.installer)
+        self.assertFalse(args.skip_pyinstaller)
+        self.assertEqual(args.iss, "installer.iss")
 
     def test_parse_args_custom(self):
         """引数パースのカスタム値検証"""
-        args = parse_args(["--skip-tests", "--output-dir", "custom_dist", "--spec", "custom.spec"])
+        args = parse_args([
+            "--skip-tests",
+            "--output-dir", "custom_dist",
+            "--spec", "custom.spec",
+            "--installer",
+            "--skip-pyinstaller",
+            "--iss", "custom.iss",
+        ])
         self.assertTrue(args.skip_tests)
         self.assertEqual(args.output_dir, "custom_dist")
         self.assertEqual(args.spec, "custom.spec")
+        self.assertTrue(args.installer)
+        self.assertTrue(args.skip_pyinstaller)
+        self.assertEqual(args.iss, "custom.iss")
 
     @patch("build.run_tests", return_value=False)
     def test_main_aborts_on_test_failure(self, mock_run_tests):
@@ -140,7 +155,110 @@ class TestBuildScript(unittest.TestCase):
         code = main(["--spec", "non_existent_file.spec"])
         self.assertEqual(code, 1)
 
+    @patch("shutil.which")
+    def test_find_iscc_exe_found_in_path(self, mock_which):
+        """PATH 上に ISCC.exe が存在する場合にそのパスを返すこと"""
+        mock_which.side_effect = lambda cmd: r"C:\Tools\ISCC.exe" if "iscc" in cmd.lower() else None
+        res = find_iscc_exe()
+        self.assertEqual(res, Path(r"C:\Tools\ISCC.exe"))
+
+    @patch("pathlib.Path.is_file")
+    @patch("pathlib.Path.exists")
+    @patch("shutil.which", return_value=None)
+    def test_find_iscc_exe_found_in_default_locations(self, mock_which, mock_exists, mock_is_file):
+        """PATH になくてもデフォルトのインストール先に存在する場合にそのパスを返すこと"""
+        mock_exists.return_value = True
+        mock_is_file.return_value = True
+        res = find_iscc_exe()
+        self.assertIsNotNone(res)
+        self.assertIn("Inno Setup 6", str(res))
+
+    @patch("pathlib.Path.is_file", return_value=False)
+    @patch("pathlib.Path.exists", return_value=False)
+    @patch("shutil.which", return_value=None)
+    def test_find_iscc_exe_not_found(self, mock_which, mock_exists, mock_is_file):
+        """いずれの候補にも見つからない場合は None を返すこと"""
+        res = find_iscc_exe()
+        self.assertIsNone(res)
+
+    def test_find_iscc_exe_live_environment(self):
+        """実機環境で Inno Setup 6 が検出できることの検証（ローカル実行環境用）"""
+        res = find_iscc_exe()
+        self.assertIsNotNone(res)
+        self.assertTrue(res.exists())
+
+    def test_build_installer_missing_files(self):
+        """iscc または iss ファイルが存在しない場合に FileNotFoundError を送出すること"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dummy_iscc = tmp_path / "ISCC.exe"
+            dummy_iss = tmp_path / "installer.iss"
+
+            # iscc が存在しない
+            with self.assertRaises(FileNotFoundError):
+                build_installer(dummy_iscc, dummy_iss, "1.1.0", tmp_path)
+
+            dummy_iscc.write_text("dummy", encoding="utf-8")
+            # iss が存在しない
+            with self.assertRaises(FileNotFoundError):
+                build_installer(dummy_iscc, dummy_iss, "1.1.0", tmp_path)
+
+    @patch("build.generate_sha256_file")
+    @patch("subprocess.run")
+    def test_build_installer_success(self, mock_run, mock_sha256):
+        """Inno Setup コンパイルが正常終了し、インストーラーとチェックサムが生成されること"""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dummy_iscc = tmp_path / "ISCC.exe"
+            dummy_iss = tmp_path / "installer.iss"
+            dummy_iscc.write_text("dummy", encoding="utf-8")
+            dummy_iss.write_text("dummy", encoding="utf-8")
+
+            # 生成される予定の exe をモック作成
+            version = "1.1.0"
+            expected_exe = tmp_path / f"PDFImageExtractor_Setup_v{version}.exe"
+            expected_exe.write_bytes(b"dummy installer binary")
+
+            res_path = build_installer(dummy_iscc, dummy_iss, version, tmp_path)
+            self.assertEqual(res_path, expected_exe)
+            mock_sha256.assert_called_once_with(expected_exe)
+
+    @patch("subprocess.run")
+    def test_build_installer_failure(self, mock_run):
+        """Inno Setup コンパイルがエラーとなった場合に RuntimeError を送出すること"""
+        mock_run.return_value = MagicMock(returncode=1)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dummy_iscc = tmp_path / "ISCC.exe"
+            dummy_iss = tmp_path / "installer.iss"
+            dummy_iscc.write_text("dummy", encoding="utf-8")
+            dummy_iss.write_text("dummy", encoding="utf-8")
+
+            with self.assertRaises(RuntimeError):
+                build_installer(dummy_iscc, dummy_iss, "1.1.0", tmp_path)
+
+    @patch("build.run_tests", return_value=True)
+    def test_main_skip_pyinstaller_missing_exe(self, mock_run_tests):
+        """--skip-pyinstaller 指定時に既存の exe が存在しない場合エラーコード 1 で中断すること"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            code = main(["--skip-tests", "--skip-pyinstaller", "--output-dir", tmp_dir])
+            self.assertEqual(code, 1)
+
+    @patch("build.find_iscc_exe", return_value=None)
+    @patch("build.run_tests", return_value=True)
+    def test_main_installer_missing_iscc(self, mock_run_tests, mock_find_iscc):
+        """--installer 指定時に ISCC が見つからない場合エラーコード 1 で中断すること"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dummy_exe = tmp_path / "PDFImageExtractor.exe"
+            dummy_exe.write_bytes(b"dummy")
+
+            code = main(["--skip-tests", "--skip-pyinstaller", "--output-dir", tmp_dir])
+            self.assertEqual(code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
-
